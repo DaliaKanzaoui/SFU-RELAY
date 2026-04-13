@@ -1,0 +1,345 @@
+<div class="dashcam-server-container">
+  <div class="header">
+    <h2>Dashcam Server (Video Streamer)</h2>
+    <div class="status-badge" [ngClass]="{
+      'connected': connected(),
+      'disconnected': !connected(),
+      'streaming': streaming()
+    }">
+      @if (!connected()) {
+        <span>Disconnected</span>
+      } @else if (streaming()) {
+        <span>Streaming to {{ activeClients().size }} client(s)</span>
+      } @else {
+        <span>Connected (No Video Source)</span>
+      }
+    </div>
+  </div>
+
+  <!-- ICE Server Configuration Button -->
+  <div class="config-button-section">
+    <button
+      class="btn btn-secondary btn-config"
+      (click)="toggleConfigPanel()"
+      [disabled]="connected() || streaming()">
+      <span class="icon">⚙️</span>
+      {{ showConfigPanel() ? 'Hide' : 'Configure' }} ICE Servers
+    </button>
+    @if (connected() || streaming()) {
+      <small class="form-hint warning">Disconnect to edit configuration</small>
+    }
+  </div>
+
+  <!-- ICE Server Configuration Panel -->
+  @if (showConfigPanel()) {
+    <div class="ice-config-panel">
+      <div class="config-panel-header">
+        <h3>ICE Server Configuration</h3>
+        <p>Configure STUN and TURN servers for WebRTC connection</p>
+      </div>
+
+      <div class="ice-servers-list">
+        @for (server of editingIceServers(); track $index) {
+          <div class="ice-server-item">
+            <div class="ice-server-header">
+              <h4>Server {{ $index + 1 }}</h4>
+              <button
+                class="btn btn-danger btn-sm"
+                (click)="removeIceServer($index)"
+                [disabled]="editingIceServers().length === 1">
+                <span class="icon">🗑️</span>
+                Remove
+              </button>
+            </div>
+
+            <div class="form-group">
+              <label [for]="'ice-url-' + $index">
+                Server URL *
+                <span class="field-hint">(stun:, turn:, or turns:)</span>
+              </label>
+              <input
+                type="text"
+                [id]="'ice-url-' + $index"
+                class="form-input"
+                [value]="server.urls"
+                (input)="updateIceServerUrl($index, $any($event.target).value)"
+                placeholder="stun:stun.l.google.com:19302">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label [for]="'ice-username-' + $index">
+                  Username
+                  <span class="field-hint">(optional for TURN)</span>
+                </label>
+                <input
+                  type="text"
+                  [id]="'ice-username-' + $index"
+                  class="form-input"
+                  [value]="server.username || ''"
+                  (input)="updateIceServerUsername($index, $any($event.target).value)"
+                  placeholder="username">
+              </div>
+
+              <div class="form-group">
+                <label [for]="'ice-credential-' + $index">
+                  Credential
+                  <span class="field-hint">(optional for TURN)</span>
+                </label>
+                <input
+                  type="password"
+                  [id]="'ice-credential-' + $index"
+                  class="form-input"
+                  [value]="server.credential || ''"
+                  (input)="updateIceServerCredential($index, $any($event.target).value)"
+                  placeholder="password">
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="config-actions">
+        <button
+          class="btn btn-secondary"
+          (click)="addIceServer()">
+          <span class="icon">➕</span>
+          Add Server
+        </button>
+
+        <button
+          class="btn btn-warning"
+          (click)="resetToDefaults()">
+          <span class="icon">↺</span>
+          Reset to Defaults
+        </button>
+
+        <div class="config-save-buttons">
+          <button
+            class="btn btn-secondary"
+            (click)="cancelIceServersEdit()">
+            Cancel
+          </button>
+          <button
+            class="btn btn-primary"
+            (click)="saveIceServersConfig()">
+            <span class="icon">💾</span>
+            Save Configuration
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Configuration Inputs -->
+  <div class="config-section">
+    <h3>Server Configuration</h3>
+
+    <div class="form-group">
+      <label for="websocketUrl">WebSocket URL</label>
+      <input
+        type="text"
+        id="websocketUrl"
+        class="form-input"
+        [value]="websocketUrl()"
+        (input)="onWebsocketUrlChange($any($event.target).value)"
+        [disabled]="connected()"
+        placeholder="wss://your-server.com/ws">
+      <small class="form-hint">Enter the WebSocket server URL (must start with wss:// or ws://)</small>
+    </div>
+
+    <div class="form-group">
+      <label for="streamId">Stream ID</label>
+      <input
+        type="text"
+        id="streamId"
+        class="form-input"
+        [value]="streamId()"
+        (input)="onStreamIdChange($any($event.target).value)"
+        [disabled]="connected()"
+        placeholder="dashcam-stream-id">
+      <small class="form-hint">Enter the stream identifier (clients will use this to connect)</small>
+    </div>
+
+    <div class="form-group">
+      <label>Server ID (Auto-generated)</label>
+      <div class="readonly-value">{{ myUsername }}</div>
+      <small class="form-hint">Unique identifier for this server session</small>
+    </div>
+  </div>
+
+  <!-- Status Message -->
+  @if (statusMessage()) {
+    <div class="status-message" [ngClass]="{
+      'status-success': statusType() === 'success',
+      'status-info': statusType() === 'info',
+      'status-warning': statusType() === 'warning',
+      'status-error': statusType() === 'error'
+    }">
+      <span class="status-icon">
+        @if (statusType() === 'success') { <span>✓</span> }
+        @if (statusType() === 'info') { <span>ℹ</span> }
+        @if (statusType() === 'warning') { <span>⚠</span> }
+        @if (statusType() === 'error') { <span>✕</span> }
+      </span>
+      <p>{{ statusMessage() }}</p>
+    </div>
+  }
+
+  <!-- Connection Controls -->
+  <div class="connection-controls">
+    <button
+      class="btn btn-primary"
+      (click)="connect()"
+      [disabled]="!canConnect()">
+      <span class="icon">📡</span>
+      {{ loading() ? 'Connecting...' : 'Connect' }}
+    </button>
+
+    <button
+      class="btn btn-secondary"
+      (click)="disconnect()"
+      [disabled]="!connected()">
+      <span class="icon">🔌</span>
+      Disconnect
+    </button>
+  </div>
+
+  <!-- Video Source Selection -->
+  @if (connected()) {
+    <div class="video-source-section">
+      <h3>Video Source</h3>
+
+      <div class="source-selection">
+        <button
+          class="btn btn-mode"
+          [class.active]="videoSource() === 'webcam'"
+          (click)="setVideoSource('webcam')"
+          [disabled]="streaming()">
+          <span class="icon">📹</span>
+          Webcam
+        </button>
+        <button
+          class="btn btn-mode"
+          [class.active]="videoSource() === 'file'"
+          (click)="setVideoSource('file')"
+          [disabled]="streaming()">
+          <span class="icon">🎬</span>
+          Video File
+        </button>
+      </div>
+
+      @if (videoSource() === 'file') {
+        <div class="form-group">
+          <label for="videoFile">Select Video File</label>
+          <input
+            type="file"
+            id="videoFile"
+            class="form-input"
+            accept="video/*"
+            (change)="onVideoFileSelected($event)"
+            [disabled]="streaming()">
+          <small class="form-hint">Select a video file to stream (will loop automatically)</small>
+        </div>
+      }
+
+      <div class="video-controls">
+        <button
+          class="btn btn-primary"
+          (click)="startVideoSource()"
+          [disabled]="!canStartStreaming() || loading()">
+          <span class="icon">▶️</span>
+          Start Streaming
+        </button>
+
+        <button
+          class="btn btn-danger"
+          (click)="stopVideoSource()"
+          [disabled]="!streaming()">
+          <span class="icon">⏹️</span>
+          Stop Streaming
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- Active Clients -->
+  @if (connected() && activeClients().size > 0) {
+    <div class="clients-section">
+      <h3>Active Clients ({{ activeClients().size }})</h3>
+      <div class="clients-list">
+        @for (clientId of activeClients(); track clientId) {
+          <div class="client-item">
+            <span class="client-id">{{ clientId }}</span>
+            <span class="client-status connected">Connected</span>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Video Display -->
+  <div class="video-section">
+    <div class="video-wrapper" [class.active]="streaming()">
+      <video
+        #local_video
+        autoplay="true"
+        playsinline="true"
+        [muted]="true"
+        class="video-element">
+      </video>
+
+      <!-- Loading Overlay -->
+      @if (loading()) {
+        <div class="loading-overlay">
+          <div class="spinner"></div>
+          <p>Loading video source...</p>
+        </div>
+      }
+
+      <!-- No Stream Message -->
+      @if (!streaming() && !loading()) {
+        <div class="no-stream">
+          <p>Start a video source to begin streaming</p>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- Debug Panel -->
+  <div class="debug-panel">
+    <div class="debug-header">
+      <h3>Debug Info</h3>
+    </div>
+    <div class="debug-grid">
+      <div class="debug-item">
+        <span class="debug-label">Video Source:</span>
+        <span class="debug-value">{{ videoSource() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">ICE Servers:</span>
+        <span class="debug-value">{{ iceServers().length }} configured</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Video Element Ready:</span>
+        <span class="debug-value" [class.active]="videoElementReady()">{{ videoElementReady() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Connected:</span>
+        <span class="debug-value" [class.active]="connected()">{{ connected() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Streaming:</span>
+        <span class="debug-value" [class.active]="streaming()">{{ streaming() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Active Clients:</span>
+        <span class="debug-value">{{ activeClients().size }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Peer Connections:</span>
+        <span class="debug-value">{{ peerConnectionsCount() }}</span>
+      </div>
+    </div>
+  </div>
+</div>

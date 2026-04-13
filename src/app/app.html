@@ -1,0 +1,20 @@
+<div class="app-container">
+  <nav class="app-nav">
+    <div class="nav-content">
+      <h1 class="nav-title">CAM Simulation</h1>
+      <div class="nav-links">
+        <a routerLink="/client" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
+          <span class="icon">📹</span>
+          Video Client
+        </a>
+        <a routerLink="/server" routerLinkActive="active">
+          <span class="icon">📡</span>
+          Dashcam Server
+        </a>
+      </div>
+    </div>
+  </nav>
+  <main class="app-main">
+    <router-outlet />
+  </main>
+</div>

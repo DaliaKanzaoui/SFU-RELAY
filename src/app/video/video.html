@@ -1,0 +1,464 @@
+<!-- standalone-video-test.component.html - WITH ICE SERVER CONFIGURATION -->
+<div class="video-test-container">
+  <div class="header">
+    <h2>WebRTC Video Stream Test</h2>
+    <div class="status-badge" [ngClass]="{
+      'connected': connected(),
+      'disconnected': !connected(),
+      'streaming': streaming(),
+      'waking-up': isWakingUp()
+    }">
+      @if (!connected()) {
+        <span>Disconnected</span>
+      } @else if (isWakingUp()) {
+        <span>⏳ Waking Up ({{ wakeupTimeRemaining() }}s)</span>
+      } @else if (streaming()) {
+        <span>{{ isPlaybackMode() ? 'Playing' : 'Streaming' }}</span>
+      } @else {
+        <span>Connected</span>
+      }
+    </div>
+  </div>
+
+  <!-- ICE Server Configuration Button -->
+  <div class="config-button-section">
+    <button
+      class="btn btn-secondary btn-config"
+      (click)="toggleConfigPanel()"
+      [disabled]="connected() || streaming()">
+      <span class="icon">⚙️</span>
+      {{ showConfigPanel() ? 'Hide' : 'Configure' }} ICE Servers
+    </button>
+    @if (connected() || streaming()) {
+      <small class="form-hint warning">Disconnect to edit configuration</small>
+    }
+  </div>
+
+  <!-- ICE Server Configuration Panel -->
+  @if (showConfigPanel()) {
+    <div class="ice-config-panel">
+      <div class="config-panel-header">
+        <h3>ICE Server Configuration</h3>
+        <p>Configure STUN and TURN servers for WebRTC connection</p>
+      </div>
+
+      <div class="ice-servers-list">
+        @for (server of editingIceServers(); track $index) {
+          <div class="ice-server-item">
+            <div class="ice-server-header">
+              <h4>Server {{ $index + 1 }}</h4>
+              <button
+                class="btn btn-danger btn-sm"
+                (click)="removeIceServer($index)"
+                [disabled]="editingIceServers().length === 1">
+                <span class="icon">🗑️</span>
+                Remove
+              </button>
+            </div>
+
+            <div class="form-group">
+              <label [for]="'ice-url-' + $index">
+                Server URL *
+                <span class="field-hint">(stun:, turn:, or turns:)</span>
+              </label>
+              <input
+                type="text"
+                [id]="'ice-url-' + $index"
+                class="form-input"
+                [value]="server.urls"
+                (input)="updateIceServerUrl($index, $any($event.target).value)"
+                placeholder="stun:stun.l.google.com:19302">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label [for]="'ice-username-' + $index">
+                  Username
+                  <span class="field-hint">(optional for TURN)</span>
+                </label>
+                <input
+                  type="text"
+                  [id]="'ice-username-' + $index"
+                  class="form-input"
+                  [value]="server.username || ''"
+                  (input)="updateIceServerUsername($index, $any($event.target).value)"
+                  placeholder="username">
+              </div>
+
+              <div class="form-group">
+                <label [for]="'ice-credential-' + $index">
+                  Credential
+                  <span class="field-hint">(optional for TURN)</span>
+                </label>
+                <input
+                  type="password"
+                  [id]="'ice-credential-' + $index"
+                  class="form-input"
+                  [value]="server.credential || ''"
+                  (input)="updateIceServerCredential($index, $any($event.target).value)"
+                  placeholder="password">
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="config-actions">
+        <button
+          class="btn btn-secondary"
+          (click)="addIceServer()">
+          <span class="icon">➕</span>
+          Add Server
+        </button>
+
+        <button
+          class="btn btn-warning"
+          (click)="resetToDefaults()">
+          <span class="icon">↺</span>
+          Reset to Defaults
+        </button>
+
+        <div class="config-save-buttons">
+          <button
+            class="btn btn-secondary"
+            (click)="cancelIceServersEdit()">
+            Cancel
+          </button>
+          <button
+            class="btn btn-primary"
+            (click)="saveIceServersConfig()">
+            <span class="icon">💾</span>
+            Save Configuration
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Mode Selection -->
+  <div class="mode-section">
+    <h3>Mode Selection</h3>
+    <div class="mode-buttons">
+      <button
+        class="btn btn-mode"
+        [class.active]="isStreamMode()"
+        (click)="setMode('stream')"
+        [disabled]="connected() || streaming()">
+        <span class="icon">📹</span>
+        Live Stream
+      </button>
+      <button
+        class="btn btn-mode"
+        [class.active]="isPlaybackMode()"
+        (click)="setMode('playback')"
+        [disabled]="connected() || streaming()">
+        <span class="icon">🎬</span>
+        Playback
+      </button>
+    </div>
+    @if (connected() || streaming()) {
+      <small class="form-hint warning">Disconnect to change mode</small>
+    }
+  </div>
+
+  <!-- Configuration Inputs -->
+  <div class="config-section">
+    <h3>Configuration</h3>
+
+    <div class="form-group">
+      <label for="websocketUrl">WebSocket URL</label>
+      <input
+        type="text"
+        id="websocketUrl"
+        class="form-input"
+        [value]="websocketUrl()"
+        (input)="onWebsocketUrlChange($any($event.target).value)"
+        [disabled]="connected()"
+        placeholder="wss://your-server.com/ws">
+      <small class="form-hint">Enter the WebSocket server URL (must start with wss:// or ws://)</small>
+    </div>
+
+    <div class="form-group">
+      <label for="targetStreamId">Target Stream ID</label>
+      <input
+        type="text"
+        id="targetStreamId"
+        class="form-input"
+        [value]="targetStreamId()"
+        (input)="onTargetStreamIdChange($any($event.target).value)"
+        [disabled]="connected()"
+        placeholder="device-stream-id">
+      <small class="form-hint">Enter the target device stream identifier</small>
+    </div>
+
+    <!-- Playback Date/Time Fields -->
+    @if (isPlaybackMode()) {
+      <div class="playback-fields">
+        <div class="form-group">
+          <label for="playbackDate">Playback Date</label>
+          <input
+            type="date"
+            id="playbackDate"
+            class="form-input"
+            [value]="playbackDate()"
+            (input)="onPlaybackDateChange($any($event.target).value)"
+            [disabled]="connected()">
+          <small class="form-hint">Select the date for recorded video playback</small>
+        </div>
+
+        <div class="form-group">
+          <label for="playbackTime">Playback Time</label>
+          <input
+            type="time"
+            id="playbackTime"
+            class="form-input"
+            [value]="playbackTime()"
+            (input)="onPlaybackTimeChange($any($event.target).value)"
+            [disabled]="connected()">
+          <small class="form-hint">Select the time for recorded video playback (hour will be adjusted -1)</small>
+        </div>
+
+        @if (playbackDate() && playbackTime()) {
+          <div class="playback-preview">
+            <strong>Playback will request:</strong>
+            <code>{{ playbackDate() }} at {{ playbackTime() }}</code>
+          </div>
+        }
+      </div>
+    }
+
+    <div class="form-group">
+      <label>Browser ID (Auto-generated)</label>
+      <div class="readonly-value">{{ myUsername }}</div>
+      <small class="form-hint">Unique identifier for this browser session</small>
+    </div>
+  </div>
+
+  <!-- Status Message -->
+  @if (statusMessage()) {
+    <div class="status-message" [ngClass]="{
+      'status-success': statusType() === 'success',
+      'status-info': statusType() === 'info',
+      'status-warning': statusType() === 'warning',
+      'status-error': statusType() === 'error'
+    }">
+      <span class="status-icon">
+        @if (statusType() === 'success') { <span>✓</span> }
+        @if (statusType() === 'info') { <span>ℹ</span> }
+        @if (statusType() === 'warning') { <span>⚠</span> }
+        @if (statusType() === 'error') { <span>✕</span> }
+      </span>
+      <p>{{ statusMessage() }}</p>
+    </div>
+  }
+
+  <!-- Wake-up Progress Indicator -->
+  @if (isWakingUp()) {
+    <div class="wakeup-progress">
+      <div class="wakeup-header">
+        <span class="wakeup-icon">⏳</span>
+        <h4>Camera Waking Up</h4>
+      </div>
+      <p>Retrying connection every 10 seconds...</p>
+      <div class="progress-bar">
+        <div class="progress-fill" [style.width.%]="(wakeupTimeRemaining() / 120) * 100"></div>
+      </div>
+      <div class="wakeup-timer">
+        <strong>{{ wakeupTimeRemaining() }}</strong> seconds remaining
+      </div>
+      <button class="btn btn-warning btn-sm" (click)="hangup()">
+        Cancel Wake-up
+      </button>
+    </div>
+  }
+
+  <!-- Connection Controls -->
+  <div class="connection-controls">
+    <button
+      class="btn btn-primary"
+      (click)="connect()"
+      [disabled]="!canConnect()">
+      <span class="icon">📡</span>
+      {{ loading() ? 'Connecting...' : 'Connect' }}
+    </button>
+
+    <button
+      class="btn btn-secondary"
+      (click)="disconnect()"
+      [disabled]="!connected()">
+      <span class="icon">🔌</span>
+      Disconnect
+    </button>
+  </div>
+
+  <!-- Camera Controls -->
+  @if (connected()) {
+    <div class="camera-controls">
+      <h3>Camera Selection</h3>
+
+      @if (isPlaybackMode() && !canStartPlayback()) {
+        <div class="validation-warning">
+          <span class="icon">⚠</span>
+          <p>Please enter date and time above before selecting a camera</p>
+        </div>
+      }
+
+      <div class="camera-buttons">
+        <button
+          class="btn btn-camera"
+          [class.active]="isDriverActive()"
+          (click)="startStream('driver')"
+          [disabled]="isDriverActive() || loading() || isWakingUp() || (isPlaybackMode() && !canStartPlayback())">
+          <span class="icon">👤</span>
+          Driver Camera
+          <small>{{ isPlaybackMode() ? 'CH2' : 'S5' }}</small>
+        </button>
+
+        <button
+          class="btn btn-camera"
+          [class.active]="isFrontActive()"
+          (click)="startStream('front')"
+          [disabled]="isFrontActive() || loading() || isWakingUp() || (isPlaybackMode() && !canStartPlayback())">
+          <span class="icon">🚗</span>
+          Front Camera
+          <small>{{ isPlaybackMode() ? 'CH1' : 'S4' }}</small>
+        </button>
+
+        <button
+          class="btn btn-camera"
+          [class.active]="isRearActive()"
+          (click)="startStream('rear')"
+          [disabled]="isRearActive() || loading() || isWakingUp() || (isPlaybackMode() && !canStartPlayback())">
+          <span class="icon">🚙</span>
+          Rear Camera
+          <small>{{ isPlaybackMode() ? 'CH3' : 'S6' }}</small>
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- Video Display -->
+  <div class="video-section">
+    <div class="video-wrapper" [class.active]="streaming()" [class.waking-up]="isWakingUp()">
+      <video
+        #remote_video
+        autoplay="true"
+        playsinline="true"
+        [muted]="false"
+        class="video-element">
+      </video>
+
+      <!-- Loading Overlay -->
+      @if (loading() || isWakingUp()) {
+        <div class="loading-overlay" [class.waking-up]="isWakingUp()">
+          <div class="spinner"></div>
+          @if (isWakingUp()) {
+            <p>Camera waking up... ({{ wakeupTimeRemaining() }}s)</p>
+            <small>Retrying every 10 seconds</small>
+          } @else {
+            <p>Loading {{ isPlaybackMode() ? 'playback' : 'stream' }}...</p>
+          }
+        </div>
+      }
+
+      <!-- No Stream Message -->
+      @if (!streaming() && !loading() && !isWakingUp()) {
+        <div class="no-stream">
+          <p>Select a camera to start {{ isPlaybackMode() ? 'playback' : 'streaming' }}</p>
+        </div>
+      }
+
+      <!-- Hangup Button -->
+      @if ((streaming() || isWakingUp()) && !loading()) {
+        <div class="video-controls">
+          <button class="btn btn-danger" (click)="hangup()">
+            <span class="icon">{{ isWakingUp() ? '✕' : '📞' }}</span>
+            {{ isWakingUp() ? 'Cancel' : 'Stop ' + (isPlaybackMode() ? 'Playback' : 'Stream') }}
+          </button>
+        </div>
+      }
+    </div>
+
+    <!-- Stream Control Buttons -->
+    @if (connected()) {
+      <div class="stream-control-buttons">
+        <button
+          class="btn btn-warning"
+          (click)="hangup()"
+          [disabled]="!streaming() && !isWakingUp()">
+          <span class="icon">⏹</span>
+          Hangup (Stop Stream Only)
+        </button>
+
+        <button
+          class="btn btn-danger"
+          (click)="disconnect()">
+          <span class="icon">🔌</span>
+          Disconnect (Close All)
+        </button>
+      </div>
+
+      <div class="control-explanation">
+        <p><strong>Hangup:</strong> Stops the current stream/playback but keeps you connected to the server. You can select another camera afterward.</p>
+        <p><strong>Disconnect:</strong> Closes the WebSocket connection completely and cleans up all resources. Requires reconnection to use again.</p>
+      </div>
+    }
+  </div>
+
+  <!-- Debug Panel -->
+  <div class="debug-panel">
+    <div class="debug-header">
+      <h3>Debug Info</h3>
+    </div>
+    <div class="debug-grid">
+      <div class="debug-item">
+        <span class="debug-label">Mode:</span>
+        <span class="debug-value" [class.active]="true">{{ mode() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">ICE Servers:</span>
+        <span class="debug-value">{{ iceServers().length }} configured</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Video Element Ready:</span>
+        <span class="debug-value" [class.active]="videoElementReady()">{{ videoElementReady() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Connected:</span>
+        <span class="debug-value" [class.active]="connected()">{{ connected() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Streaming:</span>
+        <span class="debug-value" [class.active]="streaming()">{{ streaming() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Waking Up:</span>
+        <span class="debug-value" [class.active]="isWakingUp()">{{ isWakingUp() }}</span>
+      </div>
+      @if (isWakingUp()) {
+        <div class="debug-item">
+          <span class="debug-label">Wake-up Time:</span>
+          <span class="debug-value">{{ wakeupTimeRemaining() }}s</span>
+        </div>
+      }
+      <div class="debug-item">
+        <span class="debug-label">Loading:</span>
+        <span class="debug-value" [class.active]="loading()">{{ loading() }}</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Current Camera:</span>
+        <span class="debug-value">{{ currentCamera() || 'None' }}</span>
+      </div>
+      @if (isPlaybackMode()) {
+        <div class="debug-item">
+          <span class="debug-label">Playback Date:</span>
+          <span class="debug-value">{{ playbackDate() || 'Not set' }}</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Playback Time:</span>
+          <span class="debug-value">{{ playbackTime() || 'Not set' }}</span>
+        </div>
+      }
+    </div>
+  </div>
+</div>
