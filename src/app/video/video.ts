@@ -1,6 +1,3 @@
-// video.component.ts - WITH ULTRA-FAST SEAMLESS SFU FAILOVER (double-buffering)
-// FIX: handleBecomeBackupSfu now connects to camera FIRST before sending backup-sfu-accept
-// FIX ÉCRAN NOIR: cameraPc.ontrack now sets videoElement.srcObject on the backup SFU itself
 import {
   Component,
   ElementRef,
@@ -10,7 +7,8 @@ import {
   AfterViewInit,
   signal,
   computed,
-  ChangeDetectorRef
+  ChangeDetectorRef,
+  HostListener // IMPORT FOR BEFOREUNLOAD EVENT
 } from '@angular/core';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
 import { Subject, Subscription } from 'rxjs';
@@ -164,8 +162,8 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
   isPlaybackMode = computed(() => this.mode() === 'playback');
   relayStatus = computed(() =>
     this.isSfuRelay()
-      ? `🔄 Relaying to ${this.activeViewers()} viewer(s)`
-      : '📡 Regular viewer'
+      ? ` Relaying to ${this.activeViewers()} viewer(s)`
+      : ' Regular viewer'
   );
 
   // Internal variables
@@ -197,13 +195,7 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
   // Timer de reconnexion SFU
   private sfuReconnectTimer: any = null;
 
-  // ============================================================================
-  // État du processus "become-backup-sfu"
-  //
-  // On garde la trace de l'état de la connexion backup SFU → caméra.
-  // backup-sfu-accept n'est envoyé qu'APRÈS que ontrack soit déclenché
-  // sur la cameraPeerConnection (stream caméra reçu).
-  // ============================================================================
+  
   private backupSfuState: BackupSfuState | null = null;
 
   // ============================================================================
@@ -247,17 +239,34 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
   }
 
   ngOnDestroy(): void {
-    this.performEmergencyCleanup();
-    this.clearWakeupRetry();
-    this.cleanupSfuConnections();
-    this.clearSfuReconnect();
-    this.cleanupBackupConnection();
-    this.cleanupBackupSfuState();
-
+    console.log('[NG ON DESTROY] Cleaning up resources...');
+    
+    // Stop observers first
     if (this.videoObserver) {
       this.videoObserver.disconnect();
       this.videoObserver = null;
     }
+
+    // Call the master disconnect method to ensure consistent state cleanup
+    // This matches the behavior of manual disconnect and browser unload
+    this.disconnect();
+  }
+
+  /**
+   * Handles window unload events (Refresh or Close Browser)
+   * Ensures graceful shutdown even if user navigates away manually.
+   */
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    console.warn('[BEFORE UNLOAD] Browser closing detected. Triggering full disconnect.');
+    
+    // Attempt to stop timers immediately
+    this.stopPing();
+    this.clearWakeupRetry();
+    this.clearSfuReconnect();
+    
+    // Execute full disconnect sequence
+    this.disconnect();
   }
 
   // ============================================================================
@@ -321,16 +330,16 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
 
   private async preloadBackupSfu(sfuId: string, infos?: string): Promise<void> {
     if (this.isBackupPreloading || this.backupSfuId === sfuId) {
-      console.log(`📦 Backup preload already in progress for SFU ${sfuId}`);
+      console.log(` Backup preload already in progress for SFU ${sfuId}`);
       return;
     }
 
     if (this.currentSfuId === sfuId) {
-      console.log(`📦 SFU ${sfuId} is current, skipping backup preload`);
+      console.log(` SFU ${sfuId} is current, skipping backup preload`);
       return;
     }
 
-    console.log(`🔮 DOUBLE-BUFFERING: Preloading backup SFU ${sfuId} for instant failover`);
+    console.log(` DOUBLE-BUFFERING: Preloading backup SFU ${sfuId} for instant failover`);
     this.isBackupPreloading = true;
     this.isPreloadingBackupSfu.set(true);
     this.backupSfuId = sfuId;
@@ -342,7 +351,7 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
 
       this.backupPeerConnection.ontrack = (event) => {
         if (event.streams && event.streams[0]) {
-          console.log(`✅ Backup stream received from SFU ${sfuId}`);
+          console.log(` Backup stream received from SFU ${sfuId}`);
           this.backupStream = event.streams[0];
           this.backupSfuReady.set(true);
           this.isPreloadingBackupSfu.set(false);
@@ -375,12 +384,12 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
 
       this.backupPeerConnection.oniceconnectionstatechange = () => {
         const state = this.backupPeerConnection?.iceConnectionState;
-        console.log(`📦 Backup ICE state for ${sfuId}: ${state}`);
+        console.log(` Backup ICE state for ${sfuId}: ${state}`);
 
         if (state === 'connected') {
-          console.log(`✅ Backup connection to ${sfuId} established - ready for instant switch`);
+          console.log(` Backup connection to ${sfuId} established - ready for instant switch`);
         } else if (state === 'failed') {
-          console.warn(`⚠️ Backup connection to ${sfuId} failed`);
+          console.warn(` Backup connection to ${sfuId} failed`);
           this.cleanupBackupConnection();
         }
       };
@@ -454,7 +463,7 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
 
       this.cleanupBackupConnection();
 
-      console.log(`✅ Atomic SFU switch completed: ${oldSfuId} → ${this.currentSfuId}`);
+      console.log(` Atomic SFU switch completed: ${oldSfuId} → ${this.currentSfuId}`);
       return true;
 
     } catch (error) {
@@ -1447,19 +1456,7 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
     });
   }
 
-  // ============================================================================
-  // handleBecomeBackupSfu — CORRIGÉ (FIX ÉCRAN NOIR)
-  //
-  // FLUX :
-  //   1. Créer cameraPeerConnection dédiée
-  //   2. Envoyer video-request à la caméra
-  //   3. handleVideoOffer détecte backupSfuState.waitingForCameraOffer
-  //      → traite l'offre sur cameraPeerConnection
-  //   4. cameraPc.ontrack déclenché :
-  //      a. Met à jour remoteStream
-  //      b. *** AFFICHE le stream sur videoElement du backup SFU *** ← FIX
-  //      c. Envoie backup-sfu-accept au serveur
-  // ============================================================================
+ 
 
   private async handleBecomeBackupSfu(data: any): Promise<void> {
     console.log(' Designated as backup SFU for camera:', data.cameraTarget);
@@ -1504,11 +1501,6 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
         this.remoteStream = event.streams[0];
         console.log(' Backup SFU: remoteStream updated with camera stream');
 
-        // ════════════════════════════════════════════════════════════════════
-        // FIX ÉCRAN NOIR : Afficher le stream sur le videoElement du backup SFU
-        // Sans ce bloc, le backup SFU voit un écran noir alors que les viewers
-        // reçoivent bien le flux (remoteStream est correct mais non affiché).
-        // ════════════════════════════════════════════════════════════════════
         const videoElement = this.getVideoElement();
         if (videoElement) {
           try {
@@ -2281,7 +2273,7 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
 
     // ── CAS BACKUP SFU : offre de la caméra pour le processus failover ──────
     // Debug log pour diagnostiquer les problèmes de routing
-    console.log(`🔍 handleVideoOffer: sourceId=${sourceId}, backupSfuState=${JSON.stringify({
+    console.log(` handleVideoOffer: sourceId=${sourceId}, backupSfuState=${JSON.stringify({
       waitingForCameraOffer: this.backupSfuState?.waitingForCameraOffer,
       cameraTarget: this.backupSfuState?.cameraTarget
     })}`);
@@ -2300,7 +2292,7 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
         const answer = await cameraPc.createAnswer();
         await cameraPc.setLocalDescription(answer);
 
-        console.log(`📤 Backup SFU: sending video-answer to camera ${sourceId}`);
+        console.log(` Backup SFU: sending video-answer to camera ${sourceId}`);
         this.sendMessage({
           event: 'message',
           data: {
@@ -2417,7 +2409,7 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
       try {
         if (cameraPc.remoteDescription) {
           await cameraPc.addIceCandidate(new RTCIceCandidate(candidate));
-          console.log(`✅ Backup SFU: added ICE candidate from camera ${sourceId}`);
+          console.log(` Backup SFU: added ICE candidate from camera ${sourceId}`);
         } else {
           console.warn('Backup SFU: ignoring ICE candidate — no remote description yet on cameraPc');
         }
@@ -2513,120 +2505,6 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
     } finally {
       this.createPeerConnection();
       console.log('Peer connection reset complete');
-    }
-  }
-
-  // ============================================================================
-  // CLEANUP METHODS
-  // ============================================================================
-
-  private performSafeCleanup(): void {
-    console.log('Safe cleanup triggered');
-    try {
-      if (this.streaming() && this.targetStreamId()) {
-        this.sendMessage({
-          event: 'message',
-          data: {
-            source: this.myUsername,
-            target: this.targetStreamId(),
-            type: 'hang-up'
-          }
-        });
-      }
-      this.cleanup();
-    } catch (error) {
-      console.error('Error during safe cleanup:', error);
-    }
-  }
-
-  private performEmergencyCleanup(): void {
-    console.log('Emergency cleanup triggered');
-    try {
-      if (this.streaming() && this.targetStreamId()) {
-        try {
-          this.sendMessage({
-            event: 'message',
-            data: {
-              source: this.myUsername,
-              target: this.targetStreamId(),
-              type: 'hang-up'
-            }
-          });
-        } catch (error) {
-          console.warn('Error sending hangup message:', error);
-        }
-      }
-
-      if (this.peerConnection && this.peerConnection.connectionState !== 'closed') {
-        try {
-          this.peerConnection.getTransceivers().forEach(transceiver => {
-            if (transceiver.receiver?.track) transceiver.receiver.track.stop();
-            if (transceiver.sender?.track) transceiver.sender.track.stop();
-          });
-        } catch (e) {
-          console.warn('Error stopping transceivers:', e);
-        }
-
-        try {
-          this.peerConnection.close();
-        } catch (e) {
-          console.warn('Error closing peer connection:', e);
-        }
-      }
-
-      this.cleanupBackupConnection();
-      this.cleanupBackupSfuState();
-
-      if (this.socket$) {
-        try {
-          this.socket$.complete();
-        } catch (e) {
-          console.warn('Error completing socket:', e);
-        }
-      }
-
-      this.cleanup();
-    } catch (error) {
-      console.error('Error during emergency cleanup:', error);
-    }
-  }
-
-  private cleanup(): void {
-    try {
-      this.stopPing();
-      this.clearWakeupRetry();
-      this.clearSfuReconnect();
-      this.cleanupSfuConnections();
-      this.cleanupBackupConnection();
-      this.cleanupBackupSfuState();
-
-      if (this.streaming()) {
-        this.hangup();
-      }
-
-      this.resetVideoElement();
-
-      if (this.messageSubscription) {
-        this.messageSubscription.unsubscribe();
-        this.messageSubscription = null;
-      }
-
-      if (this.socket$) {
-        this.socket$.complete();
-        this.socket$ = null;
-      }
-
-      if (this.peerConnection) {
-        this.peerConnection.close();
-        this.peerConnection = null;
-      }
-
-      this.connected.set(false);
-      this.streaming.set(false);
-      this.loading.set(false);
-      this.currentCamera.set(null);
-    } catch (error) {
-      console.error('Error during cleanup:', error);
     }
   }
 
