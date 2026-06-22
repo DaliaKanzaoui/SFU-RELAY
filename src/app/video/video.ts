@@ -160,6 +160,11 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
   isRearActive = computed(() => this.currentCamera() === 'rear');
   isStreamMode = computed(() => this.mode() === 'stream');
   isPlaybackMode = computed(() => this.mode() === 'playback');
+  // ── Playback Map signals ───────────────────────────────────────────────────
+playbackMapStart = signal<string>('');
+playbackMapEnd   = signal<string>('');
+playbackMapStatus = signal<string>('');
+playbackMapError  = signal<boolean>(false);
   relayStatus = computed(() =>
     this.isSfuRelay()
       ? ` Relaying to ${this.activeViewers()} viewer(s)`
@@ -2552,5 +2557,38 @@ export class VideoComponent implements OnInit, OnDestroy, AfterViewInit {
   onPlaybackTimeChange(value: string): void {
     this.playbackTime.set(value);
     this.statusMessage.set('');
+  } // ============================================================================
+// PLAYBACK MAP
+// ============================================================================
+
+sendPlaybackMap(): void {
+  if (!this.playbackMapStart() || !this.playbackMapEnd()) return;
+
+  this.playbackMapError.set(false);
+  this.playbackMapStatus.set('Sending playback map...');
+
+  try {
+    this.sendMessage({
+      event: 'message',
+      data: {
+        source: this.myUsername,
+        target: this.targetStreamId(),
+        type: 'playback-map',
+        start: this.playbackMapStart(),
+        end: this.playbackMapEnd()
+      }
+    });
+    this.playbackMapStatus.set('Playback map sent successfully');
+  } catch (error) {
+    this.playbackMapError.set(true);
+    this.playbackMapStatus.set('Failed to send playback map');
   }
+}
+
+clearPlaybackMapInputs(): void {
+  this.playbackMapStart.set('');
+  this.playbackMapEnd.set('');
+  this.playbackMapStatus.set('');
+  this.playbackMapError.set(false);
+}
 }

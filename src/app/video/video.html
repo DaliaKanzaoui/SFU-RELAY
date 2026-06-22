@@ -1,3 +1,4 @@
+
 <!-- standalone-video-test.component.html - WITH ICE SERVER CONFIGURATION -->
 <div class="video-test-container">
   <div class="header">
@@ -224,6 +225,62 @@
             <code>{{ playbackDate() }} at {{ playbackTime() }}</code>
           </div>
         }
+
+        <!-- Playback Map Section -->
+        <div class="playback-map-section">
+          <h4>Playback Map Control</h4>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="playbackMapStart">Start Time</label>
+              <input
+                type="text"
+                id="playbackMapStart"
+                class="form-input"
+                [(ngModel)]="playbackMapStart"
+                placeholder="YYYYMMDD-HHMMSS"
+                [disabled]="!connected() || isWakingUp()">
+              <small class="form-hint">Format: 20260101-120000</small>
+            </div>
+
+            <div class="form-group">
+              <label for="playbackMapEnd">End Time</label>
+              <input
+                type="text"
+                id="playbackMapEnd"
+                class="form-input"
+                [(ngModel)]="playbackMapEnd"
+                placeholder="YYYYMMDD-HHMMSS"
+                [disabled]="!connected() || isWakingUp()">
+              <small class="form-hint">Format: 20260311-130000</small>
+            </div>
+          </div>
+
+          <div class="playback-map-actions">
+            <button
+              class="btn btn-primary"
+              (click)="sendPlaybackMap()"
+              [disabled]="!connected() || isWakingUp() || !playbackMapStart || !playbackMapEnd">
+              <span class="icon">🗺️</span>
+              Send Playback Map
+            </button>
+            
+            <button
+              class="btn btn-secondary"
+              (click)="clearPlaybackMapInputs()"
+              [disabled]="!playbackMapStart && !playbackMapEnd">
+              <span class="icon">🗑️</span>
+              Clear
+            </button>
+          </div>
+          
+          @if (playbackMapStatus()) {
+            <div class="playback-map-status" [class.error]="playbackMapError()">
+              <span class="status-icon">{{ playbackMapError() ? '⚠️' : '✓' }}</span>
+              <span>{{ playbackMapStatus() }}</span>
+            </div>
+          }
+        </div>
       </div>
     }
 
@@ -459,6 +516,11 @@
           <span class="debug-value">{{ playbackTime() || 'Not set' }}</span>
         </div>
       }
+      <!-- Playback Map Debug Info -->
+      <div class="debug-item">
+        <span class="debug-label">Playback Map:</span>
+         <span class="debug-value">{{ playbackMapStart() && playbackMapEnd() ? playbackMapStart() + ' → ' + playbackMapEnd() : 'Not set' }}</span>
+      </div>
     </div>
   </div>
 </div>
